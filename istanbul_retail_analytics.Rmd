@@ -1,0 +1,866 @@
+---
+title: "İstanbul Alış-Veriş Məlumatları üzrə Çoxölçülü Pərakəndə Satış Analitikası"
+author: "Azizov Azer"
+date: "`r format(Sys.Date(), '%d %b %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+
+
+## Kitabxanaların çağırılması və məlumatların yüklənməsi
+
+```{r setup, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+library(tidyverse) 
+library(lubridate) 
+library(scales) 
+library(knitr)
+shopping = read.csv("C:/Users/Azer/OneDrive/Desktop/R Devlab/customer_shopping_data.csv")
+```
+
+## Datanın keyfiyyət yoxlaması
+
+```{r keyfiyyet, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+# Sətir və sütun sayı
+dim(shopping)
+
+# Sütunlar və onların tipləri
+glimpse(shopping)
+
+# Hər sütunda boş (NA) dəyərlərin sayı
+colSums(is.na(shopping))
+
+# Təkrarlanan sətirlər və təkrarlanan faktura nömrələri
+sum(duplicated(shopping))
+sum(duplicated(shopping$invoice_no))
+
+# Rəqəmli sütunların xülasəsi (min, max, orta)
+summary(shopping[, c("age", "quantity", "price")])
+```
+
+
+```{r price_yoxlama, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+# Hər kateqoriyada bir ədədin qiyməti (price / quantity) sabitdirmi?
+shopping %>%
+  mutate(vahid_qiymet = price / quantity) %>%
+  group_by(category) %>%
+  summarise(
+    min_qiymet = min(vahid_qiymet),
+    max_qiymet = max(vahid_qiymet)
+  ) %>%
+  kable(digits = 2)
+```
+
+
+```{r gelir, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+# Ümumi satış gəliri
+shopping$gelir = shopping$price
+
+# Bütün dövr üzrə ümumi gəlir
+sum(shopping$gelir)
+```
+
+## Tarix sütununun hazırlanması
+
+
+```{r task1, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+# Tarix sütununun çevrilməsi (format: gün/ay/il)
+shopping$invoice_date = as.Date(
+  shopping$invoice_date,
+  format = "%d/%m/%Y"
+)
+
+# Tarixin düzgün çevrildiyini yoxlamaq (NA sayı 0 olmalıdır)
+sum(is.na(shopping$invoice_date))
+
+# İl
+shopping$year = year(shopping$invoice_date)
+
+# Ay
+shopping$month = month(shopping$invoice_date)
+
+# İl və ay
+shopping$year_month = floor_date(
+  shopping$invoice_date,
+  unit = "month"
+)
+
+# Nəticəni yoxlamaq
+head(
+  shopping[, c(
+    "invoice_date",
+    "year",
+    "month",
+    "quantity",
+    "price",
+    "gelir"
+  )]
+)
+
+# Datanın əhatə etdiyi tarix aralığı
+range(shopping$invoice_date)
+
+# İllər üzrə əməliyyat sayı
+table(shopping$year)
+
+# 2023-də hansı aylar var?
+table(shopping$month[shopping$year == 2023])
+```
+
+
+## Məhsul kateqoriyalarının təhlili
+
+
+```{r task2, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+kateqoriya_tehlili = shopping %>%
+  group_by(category) %>%
+  summarise(
+    emeliyyat_sayi = n(),
+    umumi_gelir = sum(gelir),
+    orta_alis = mean(gelir)
+  ) %>%
+  mutate(
+    emeliyyat_payi = emeliyyat_sayi / sum(emeliyyat_sayi) * 100,
+    gelir_payi = umumi_gelir / sum(umumi_gelir) * 100
+  ) %>%
+  arrange(desc(umumi_gelir)) %>%
+  mutate(reytinq = row_number()) %>%      # gəlirə görə sıra nömrəsi
+  select(reytinq, everything())
+
+kable(kateqoriya_tehlili, digits = 2, format.args = list(big.mark = ","))
+
+#Kateqoriyalar üzrə ümumi gəlir qrafiki
+ggplot(
+  kateqoriya_tehlili,
+  aes(
+    x = reorder(category, umumi_gelir),
+    y = umumi_gelir
+  )
+) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  scale_y_continuous(
+    labels = label_number(big.mark = ",")
+  ) +
+  labs(
+    title = "Məhsul kateqoriyalarına görə ümumi gəlir",
+    x = "Məhsul kateqoriyası",
+    y = "Ümumi gəlir"
+  ) +
+  theme_minimal()
+```
+
+
+
+## AVM-lər üzrə satış təhlili
+
+
+```{r task3, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+avm_tehlili = shopping %>%
+  group_by(shopping_mall) %>%
+  summarise(
+    emeliyyat_sayi = n(),
+    umumi_gelir = sum(gelir),
+    orta_alis = mean(gelir)
+  ) %>%
+  mutate(gelir_payi = umumi_gelir / sum(umumi_gelir) * 100) %>%
+  arrange(desc(umumi_gelir)) %>%
+  mutate(reytinq = row_number()) %>%
+  select(reytinq, everything())
+
+kable(avm_tehlili, digits = 2, format.args = list(big.mark = ","))
+
+#AVM-lər üzrə gəlir qrafiki
+ggplot(
+  avm_tehlili,
+  aes(
+    x = reorder(shopping_mall, umumi_gelir),
+    y = umumi_gelir
+  )
+) +
+  geom_col(fill = "darkgreen") +
+  coord_flip() +
+  scale_y_continuous(
+    labels = label_number(big.mark = ",")
+  ) +
+  labs(
+    title = "Alış-veriş mərkəzləri üzrə ümumi gəlir",
+    x = "Alış-veriş mərkəzi",
+    y = "Ümumi gəlir"
+  ) +
+  theme_minimal()
+```
+
+
+
+## Ödəniş üsullarının təhlili
+
+
+```{r task4, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+odenis_tehlili = shopping %>%
+  group_by(payment_method) %>%
+  summarise(
+    emeliyyat_sayi = n(),
+    umumi_gelir = sum(gelir),
+    orta_alis = mean(gelir)
+  ) %>%
+  mutate(
+    emeliyyat_payi = emeliyyat_sayi / sum(emeliyyat_sayi) * 100,
+    gelir_payi = umumi_gelir / sum(umumi_gelir) * 100
+  ) %>%
+  arrange(desc(emeliyyat_sayi))
+
+kable(odenis_tehlili, digits = 2, format.args = list(big.mark = ","))
+
+#Ödəniş üsulları üzrə qrafik
+ggplot(
+  odenis_tehlili,
+  aes(
+    x = reorder(payment_method, emeliyyat_sayi),
+    y = emeliyyat_sayi
+  )
+) +
+  geom_col(fill = "orange") +
+  coord_flip() +
+  labs(
+    title = "Ödəniş üsullarının istifadə tezliyi",
+    x = "Ödəniş üsulu",
+    y = "Əməliyyat sayı"
+  ) +
+  theme_minimal()
+```
+
+
+
+
+## Kişi və qadın müştərilərin xərcləmə davranışları
+
+Əvvəlcə cins üzrə ümumi xülasə:
+
+```{r task5a, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+cins_umumi = shopping %>%
+  group_by(gender) %>%
+  summarise(
+    emeliyyat_sayi = n(),
+    umumi_xerc = sum(gelir),
+    orta_alis = mean(gelir)
+  ) %>%
+  mutate(
+    emeliyyat_payi = emeliyyat_sayi / sum(emeliyyat_sayi) * 100,
+    xerc_payi = umumi_xerc / sum(umumi_xerc) * 100
+  )
+
+kable(cins_umumi, digits = 2, format.args = list(big.mark = ","))
+```
+
+
+
+```{r task5, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+cins_tehlili = shopping %>%
+  group_by(gender, category) %>%
+  summarise(
+    emeliyyat_sayi = n(),
+    umumi_xerc = sum(gelir),
+    orta_alis = mean(gelir),
+    .groups = "drop"
+  )
+
+kable(cins_tehlili, digits = 2, format.args = list(big.mark = ","))
+
+ggplot(
+  cins_tehlili,
+  aes(
+    x = category,
+    y = umumi_xerc,
+    fill = gender
+  )
+) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(
+    labels = label_number(big.mark = ",")
+  ) +
+  labs(
+    title = "Cins və məhsul kateqoriyası üzrə ümumi xərclər",
+    x = "Məhsul kateqoriyası",
+    y = "Ümumi xərc",
+    fill = "Cins"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    )
+  )
+```
+
+
+```{r task5b, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+cins_pay = cins_tehlili %>%
+  group_by(gender) %>%
+  mutate(xerc_payi = umumi_xerc / sum(umumi_xerc) * 100) %>%   # hər cinsin öz cəminə görə pay
+  ungroup() %>%
+  select(category, gender, xerc_payi, orta_alis) %>%
+  pivot_wider(
+    names_from = gender,
+    values_from = c(xerc_payi, orta_alis)
+  ) %>%
+  mutate(
+    pay_ferqi = abs(xerc_payi_Female - xerc_payi_Male),
+    orta_alis_ferqi_faiz = (orta_alis_Male - orta_alis_Female) / orta_alis_Female * 100
+  ) %>%
+  arrange(desc(xerc_payi_Female))
+
+kable(cins_pay, digits = 2)
+```
+
+
+
+
+## Pivot cədvəl: AVM və məhsul kateqoriyası üzrə gəlir
+
+
+```{r task6, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+pivot_gelir = shopping %>%
+  group_by(shopping_mall, category) %>%
+  summarise(
+    umumi_gelir = sum(gelir),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = category,
+    values_from = umumi_gelir,
+    values_fill = 0
+  ) %>%
+  mutate(Cemi = rowSums(across(-shopping_mall))) %>%    # hər AVM-in cəmi
+  arrange(desc(Cemi))
+
+kable(pivot_gelir, digits = 0, format.args = list(big.mark = ","))
+```
+
+```{r task6b, fig.width=10, fig.height=6, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+#Pivot cədvəlin istilik xəritəsi
+pivot_uzun = shopping %>%
+  group_by(shopping_mall, category) %>%
+  summarise(
+    umumi_gelir = sum(gelir),
+    .groups = "drop"
+  )
+
+ggplot(
+  pivot_uzun,
+  aes(
+    x = reorder(category, -umumi_gelir, FUN = sum),
+    y = reorder(shopping_mall, umumi_gelir, FUN = sum),
+    fill = umumi_gelir
+  )
+) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(umumi_gelir / 1000)), size = 3) +
+  scale_fill_gradient(
+    low = "lightyellow",
+    high = "orangered",
+    labels = label_number(big.mark = ",")
+  ) +
+  labs(
+    title = "AVM və kateqoriya üzrə ümumi gəlir",
+    x = "Məhsul kateqoriyası",
+    y = "Alış-veriş mərkəzi",
+    fill = "Ümumi gəlir",
+    caption = "Xanalardakı rəqəmlər min vahidi ilədir"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    )
+  )
+```
+
+
+
+```{r task6c, fig.width=10, fig.height=6, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+# Hər AVM-in gəlirinin neçə faizi hansı kateqoriyadan gəlir?
+pivot_pay = pivot_uzun %>%
+  group_by(shopping_mall) %>%
+  mutate(pay_faizi = umumi_gelir / sum(umumi_gelir) * 100) %>%
+  ungroup()
+
+ggplot(
+  pivot_pay,
+  aes(
+    x = reorder(category, -umumi_gelir, FUN = sum),
+    y = reorder(shopping_mall, umumi_gelir, FUN = sum),
+    fill = pay_faizi
+  )
+) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(pay_faizi, 1)), size = 3) +
+  scale_fill_gradient(
+    low = "lightyellow",
+    high = "orangered"
+  ) +
+  labs(
+    title = "Hər AVM-də kateqoriyaların gəlir payı (%)",
+    x = "Məhsul kateqoriyası",
+    y = "Alış-veriş mərkəzi",
+    fill = "Pay (%)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    )
+  )
+
+# AVM-in kateqoriya payı ümumi ortadan ən çox neçə faiz bəndi fərqlənir?
+umumi_pay = pivot_uzun %>%
+  group_by(category) %>%
+  summarise(g = sum(umumi_gelir)) %>%
+  mutate(umumi_pay = g / sum(g) * 100)
+
+pivot_pay %>%
+  left_join(umumi_pay, by = "category") %>%
+  mutate(ferq = pay_faizi - umumi_pay) %>%
+  summarise(en_boyuk_ferq = max(abs(ferq))) %>%
+  kable(digits = 2)
+```
+
+
+
+
+## 2021–2023-cü illər üzrə gəlir tendensiyası
+
+
+```{r task7, fig.width=10, fig.height=6, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+illik_gelir = shopping %>%
+  filter(year %in% c(2021, 2022, 2023)) %>%
+  group_by(year, category) %>%
+  summarise(
+    umumi_gelir = sum(gelir),
+    .groups = "drop"
+  )
+
+# Cədvəl: hər kateqoriyanın illik gəliri və 2021 → 2022 dəyişmə (tam illər)
+illik_cedvel = illik_gelir %>%
+  pivot_wider(
+    names_from = year,
+    values_from = umumi_gelir,
+    names_prefix = "il_"
+  ) %>%
+  mutate(artim_2022_faiz = (il_2022 - il_2021) / il_2021 * 100) %>%
+  arrange(desc(il_2022))
+
+kable(illik_cedvel, digits = 2, format.args = list(big.mark = ","))
+
+#İllik gəlirin xətti qrafiki
+ggplot(
+  illik_gelir,
+  aes(
+    x = year,
+    y = umumi_gelir,
+    color = category,
+    group = category
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_x_continuous(
+    breaks = c(2021, 2022, 2023)
+  ) +
+  scale_y_continuous(
+    labels = label_number(big.mark = ",")
+  ) +
+  labs(
+    title = "2021–2023-cü illər üzrə kateqoriyalara görə gəlir",
+    x = "İl",
+    y = "Ümumi gəlir",
+    color = "Kateqoriya",
+    caption = "Diqqət: 2023 natamamdır (data yalnız 8 mart-a qədərdir)"
+  ) +
+  theme_minimal()
+```
+
+
+
+```{r task7b, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+# Hər ilin yalnız yanvar–fevral ayları
+yan_fev = shopping %>%
+  filter(month <= 2) %>%
+  group_by(year, category) %>%
+  summarise(
+    umumi_gelir = sum(gelir),
+    .groups = "drop"
+  )
+
+# Ümumi gəlir (bütün kateqoriyalar) və əvvəlki ilə nisbətən dəyişmə
+yan_fev_umumi = yan_fev %>%
+  group_by(year) %>%
+  summarise(umumi_gelir = sum(umumi_gelir)) %>%
+  mutate(
+    deyisme_faizi = (umumi_gelir - lag(umumi_gelir)) / lag(umumi_gelir) * 100,
+    year = as.character(year)       # cədvəldə il 2,021 kimi görünməsin
+  )
+
+kable(yan_fev_umumi, digits = 2, format.args = list(big.mark = ","))
+```
+
+### Mövsümilik: aylar üzrə gündəlik orta gəlir
+
+
+
+```{r task7c, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+movsum = shopping %>%
+  filter(year <= 2022) %>%
+  group_by(year, month) %>%
+  summarise(
+    umumi_gelir = sum(gelir),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    gun_sayi = as.numeric(days_in_month(make_date(year, month, 1))),
+    gundelik_gelir = umumi_gelir / gun_sayi
+  ) %>%
+  group_by(month) %>%
+  summarise(gundelik_gelir = mean(gundelik_gelir))     # 2021 və 2022-nin ortası
+
+ggplot(
+  movsum,
+  aes(
+    x = factor(month),
+    y = gundelik_gelir
+  )
+) +
+  geom_col(fill = "seagreen") +
+  geom_hline(
+    yintercept = mean(movsum$gundelik_gelir),
+    color = "red",
+    linetype = "dashed"
+  ) +
+  scale_y_continuous(
+    labels = label_number(big.mark = ",")
+  ) +
+  labs(
+    title = "Aylar üzrə gündəlik orta gəlir (2021–2022)",
+    x = "Ay (1 = yanvar, 12 = dekabr)",
+    y = "Gündəlik orta gəlir",
+    caption = "Qırmızı xətt bütün ayların ortasıdır"
+  ) +
+  theme_minimal()
+
+# Ən yüksək və ən aşağı ay
+movsum %>%
+  filter(gundelik_gelir == max(gundelik_gelir) | gundelik_gelir == min(gundelik_gelir)) %>%
+  kable(digits = 0, format.args = list(big.mark = ","))
+```
+
+
+
+## AVM-lər üzrə aylıq gəlir artımı
+
+
+
+```{r task8, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+ayliq_gelir = shopping %>%
+  filter(year_month < as.Date("2023-03-01")) %>%     # 8 günlük natamam martı çıxarırıq
+  group_by(shopping_mall, year_month) %>%
+  summarise(
+    umumi_gelir = sum(gelir),
+    .groups = "drop"
+  ) %>%
+  arrange(shopping_mall, year_month) %>%
+  group_by(shopping_mall) %>%
+  mutate(
+    evvelki_ay_geliri = lag(umumi_gelir),
+    artim_faizi = ifelse(
+      evvelki_ay_geliri > 0,
+      (umumi_gelir - evvelki_ay_geliri) /
+        evvelki_ay_geliri * 100,
+      NA_real_
+    )
+  ) %>%
+  ungroup()
+
+# İlk 12 sətir (bütün cədvəl ayliq_gelir adlı dəyişəndədir)
+ayliq_gelir %>%
+  select(shopping_mall, year_month, umumi_gelir, artim_faizi) %>%
+  head(12) %>%
+  kable(digits = 2, format.args = list(big.mark = ","))
+```
+
+
+
+```{r task8b, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+mom_xulase = ayliq_gelir %>%
+  group_by(shopping_mall) %>%
+  summarise(
+    orta_artim = mean(artim_faizi, na.rm = TRUE),
+    dalgalanma_std = sd(artim_faizi, na.rm = TRUE),
+    en_yaxsi_artim = max(artim_faizi, na.rm = TRUE),
+    en_zeif_deyisme = min(artim_faizi, na.rm = TRUE)
+  ) %>%
+  arrange(dalgalanma_std)
+
+kable(mom_xulase, digits = 1)
+```
+
+```{r task8c, fig.width=14, fig.height=5, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+# İstilik xəritəsi: yaşıl = artım, qırmızı = azalma
+ggplot(
+  ayliq_gelir %>% filter(!is.na(artim_faizi)),
+  aes(
+    x = format(year_month, "%Y-%m"),
+    y = reorder(shopping_mall, umumi_gelir, FUN = sum),
+    fill = artim_faizi
+  )
+) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(artim_faizi)), size = 2.5) +
+  scale_fill_gradient2(
+    low = "tomato",
+    mid = "white",
+    high = "forestgreen",
+    midpoint = 0,
+    limits = c(-50, 50),
+    oob = squish
+  ) +
+  labs(
+    title = "AVM-lər üzrə aylıq gəlir artımı (MoM, %)",
+    x = "Ay",
+    y = "Alış-veriş mərkəzi",
+    fill = "Artım (%)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    )
+  )
+```
+
+
+
+
+## Hər kateqoriyada ən çox istifadə edilən ödəniş üsulu
+
+```{r task9, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+kateqoriya_odenis = shopping %>%
+  count(
+    category,
+    payment_method,
+    name = "emeliyyat_sayi"
+  ) %>%
+  group_by(category) %>%
+  mutate(pay_faizi = emeliyyat_sayi / sum(emeliyyat_sayi) * 100) %>%
+  ungroup()
+
+# Hər kateqoriyada ən çox istifadə edilən ödəniş üsulu
+dominant_odenis = kateqoriya_odenis %>%
+  group_by(category) %>%
+  filter(
+    emeliyyat_sayi == max(emeliyyat_sayi)
+  ) %>%
+  ungroup() %>%
+  arrange(category)
+
+kable(dominant_odenis, digits = 1, format.args = list(big.mark = ","))
+
+# Bütün ödəniş üsullarının payı (%)
+kateqoriya_odenis %>%
+  select(category, payment_method, pay_faizi) %>%
+  pivot_wider(names_from = payment_method, values_from = pay_faizi) %>%
+  kable(digits = 1)
+
+ggplot(
+  kateqoriya_odenis,
+  aes(
+    x = category,
+    y = pay_faizi,
+    fill = payment_method
+  )
+) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Hər kateqoriyada ödəniş üsullarının payı",
+    x = "Məhsul kateqoriyası",
+    y = "Pay (%)",
+    fill = "Ödəniş üsulu"
+  ) +
+  theme_minimal()
+```
+
+
+
+## Əsas göstəricilər
+
+```{r task10, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+#Ən çox gəlir gətirən kateqoriya
+kateqoriya_tehlili %>%
+  slice_max(
+    order_by = umumi_gelir,
+    n = 1
+  ) %>%
+  select(category, umumi_gelir)
+
+#Ən yüksək orta alış məbləğinə malik AVM
+avm_tehlili %>%
+  slice_max(
+    order_by = orta_alis,
+    n = 1
+  ) %>%
+  select(shopping_mall, orta_alis)
+
+#Ən çox istifadə edilən ödəniş üsulu
+odenis_tehlili %>%
+  slice_max(
+    order_by = emeliyyat_sayi,
+    n = 1
+  ) %>%
+  select(payment_method, emeliyyat_sayi)
+
+#Ümumi gəlirə görə illər (2023 natamamdır!)
+illik_umumi_gelir = shopping %>%
+  group_by(year) %>%
+  summarise(
+    umumi_gelir = sum(gelir)
+  ) %>%
+  arrange(desc(umumi_gelir))
+
+print(illik_umumi_gelir)
+```
+
+
+## AVM rəhbərliyi üçün 5 biznes nəticəsi
+
+### Nəticə 1. Gəlir üç yüksək qiymətli kateqoriyada cəmləşib
+
+```{r task11, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+# Ən yüksək gəlirli 3 kateqoriya ilə qalan 5 kateqoriyanın müqayisəsi
+kateqoriya_tehlili %>%
+  mutate(qrup = ifelse(reytinq <= 3, "Top-3 kateqoriya", "Qalan 5 kateqoriya")) %>%
+  group_by(qrup) %>%
+  summarise(
+    gelir_payi = sum(gelir_payi),
+    emeliyyat_payi = sum(emeliyyat_payi)
+  ) %>%
+  kable(digits = 1)
+```
+
+**Nə gördük:** Clothing, Shoes və Technology gəlirin **94.8%**-ni verir, halbuki əməliyyatların cəmi 49.8%-ni təşkil edir. Qalan beş kateqoriya (Cosmetics, Toys, Food & Beverage, Books, Souvenir) əməliyyatların 50.2%-i olsa da gəlirin cəmi **5.2%**-ni verir. Orta alış məbləği: Technology 3,157, Shoes 1,807, Clothing 901; Food & Beverage isə cəmi 15.67.
+
+**Nə etməli:**
+
+- Ən yaxşı yerləri və ən böyük sahələri Clothing, Shoes və Technology mağazalarına ayırmaq; yeni kirayəçi cəlb edərkən bu üç kateqoriyaya prioritet vermək.
+- Ucuz kateqoriyalar gəlirə az təsir edir, amma əməliyyatların yarısını təşkil edir. Onları ziyarətçi gətirən kateqoriya kimi saxlamaq, qiymətləndirməni isə gəlirlə yox, ziyarətçi gətirmə effekti ilə aparmaq.
+
+### Nəticə 2. AVM-lərin gəlir fərqi əməliyyat sayından gəlir, orta alışdan yox
+
+```{r task12, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+# AVM-in gəliri ilə əməliyyat sayı nə qədər bağlıdır? (1-ə yaxın = demək olar ki, eyni hərəkət edirlər)
+cor(avm_tehlili$umumi_gelir, avm_tehlili$emeliyyat_sayi)
+
+# Orta alışın ən yüksək və ən aşağı olduğu AVM
+avm_tehlili %>%
+  filter(orta_alis == max(orta_alis) | orta_alis == min(orta_alis)) %>%
+  select(shopping_mall, orta_alis) %>%
+  kable(digits = 2)
+
+# Aylıq artımın dalğalanması (standart sapma, %)
+mom_xulase %>%
+  select(shopping_mall, dalgalanma_std) %>%
+  kable(digits = 1)
+```
+
+**Nə gördük:** Mall of Istanbul (20.2%), Kanyon (20.0%) və Metrocity (15.0%) birlikdə gəlirin **55.2%**-ni verir. Ən kiçik beş AVM-in hər biri təxminən 5%-dir (4.9–5.1%). AVM-in gəliri ilə əməliyyat sayı praktiki olaraq eyni hərəkət edir (korrelyasiya ≈ 1.00). Orta alış məbləği isə AVM-lər arasında çox yaxındır: 674.36 (Forum Istanbul) – 704.72 (Emaar Square Mall), fərq cəmi 4.5%. Kanyon gəlirdə 2-ci, orta alışda isə 4-cü yerdədir.
+
+**Nə etməli:**
+
+- Kiçik AVM-lər üçün əsas hədəf ziyarətçi sayı və alışa çevrilmədir (tədbirlər, kampaniyalar, nəqliyyat əlaqəsi). Qiymət və ya "premium" strategiyası əsaslı olmazdı, çünki orta alış hər yerdə demək olar ki, eynidir.
+- Kiçik AVM-lərdə aylıq gəlir çox dalğalıdır (aylıq artımın standart sapması 18–35%, ilk üç AVM-də isə 9–11%). Bir aylıq düşməyə reaksiya verməzdən əvvəl 3–6 aylıq trendə baxmaq lazımdır.
+
+### Nəticə 3. Gəlir artmır, mövsümilik isə zəifdir
+
+```{r task13, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+# 2021 → 2022 ümumi gəlir dəyişməsi (%)
+(sum(illik_cedvel$il_2022) - sum(illik_cedvel$il_2021)) / sum(illik_cedvel$il_2021) * 100
+
+# 2021 → 2022 kateqoriya üzrə dəyişmə (%)
+illik_cedvel %>%
+  select(category, artim_2022_faiz) %>%
+  kable(digits = 2)
+
+# Yanvar–fevral müqayisəsi
+kable(yan_fev_umumi, digits = 2, format.args = list(big.mark = ","))
+
+# Gündəlik gəlirin ən yüksək və ən aşağı olduğu ay
+movsum %>%
+  filter(gundelik_gelir == max(gundelik_gelir) | gundelik_gelir == min(gundelik_gelir)) %>%
+  kable(digits = 0, format.args = list(big.mark = ","))
+```
+
+**Nə gördük:** 2021-dən 2022-ə ümumi gəlir cəmi **+0.18%** dəyişib (31.32 → 31.37 milyon). Ən böyük kateqoriya Clothing 2.05% azalıb (14.37 → 14.07 milyon), Shoes +1.65%, Technology +2.31%, Books +6.75%. 2023 natamamdır, amma eyni dövrü (yanvar–fevral) müqayisə etdikdə 2023 2022-dən **4.1%** yüksəkdir (ilkin siqnal, cəmi 2 ay). Gündəlik orta gəlir ən yüksək ay (iyul) ilə ən aşağı ay (noyabr) arasında cəmi 7.6% fərqlənir.
+
+**Nə etməli:**
+
+- Clothing-in azalması (təxminən 0.29 milyon) digər kateqoriyalardakı artımın demək olar ki, hamısını neytrallaşdırıb. Clothing mağazaları üçün kolleksiya və kampaniya tədbirləri planlaşdırmaq, yanvar–fevraldakı bərpanın davam edib-etmədiyini izləmək.
+- Güclü mövsümilik olmadığı üçün kampaniya ilə süni zirvə yaratmaq imkanı var. Noyabr ən zəif aydır; onu festival və ya endirim kampaniyası üçün sınaq ayı seçib nəticəni əvvəlki illərin eyni ayı ilə müqayisə etmək olar.
+
+### Nəticə 4. Kişi və qadınlar eyni xərcləyir, fərq yalnız alıcıların sayındadır
+
+```{r task14, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+kable(cins_umumi, digits = 2, format.args = list(big.mark = ","))
+
+# Kateqoriyalar üzrə ən böyük fərqlər
+cins_pay %>%
+  summarise(
+    en_boyuk_pay_ferqi = max(pay_ferqi),
+    en_boyuk_orta_alis_ferqi = max(abs(orta_alis_ferqi_faiz))
+  ) %>%
+  kable(digits = 2)
+```
+
+**Nə gördük:** Qadınlar əməliyyatların **59.8%**-ni, kişilər 40.2%-ni təşkil edir. Bir alışda orta xərcləmə demək olar ki, eynidir: qadın 688.14, kişi 690.92. Xərcləmənin kateqoriyalara bölgüsü də eynidir (ən böyük fərq Shoes-da, cəmi 0.50 faiz bəndi; orta alış fərqi hər kateqoriyada 1%-dən azdır).
+
+**Nə etməli:**
+
+- Cinsə görə kateqoriya üzrə ayrıca təklif hazırlamağa ehtiyac yoxdur, çünki davranış eynidir.
+- Kişilər bir alışda qadın qədər xərcləyir, amma alıcıların yalnız 40%-ni təşkil edir. Kişi auditoriyasına yönəlmiş kiçik test kampaniyaları (məs. Technology və Shoes üzrə) keçirib kişi alıcı sayının artıb-artmadığını yoxlamaq.
+
+### Nəticə 5. Nağd ödəniş hər kateqoriyada üstündür, hətta bahalı alışlarda
+
+```{r task15, error=FALSE, message=FALSE, warning=FALSE, echo=TRUE, include=TRUE}
+odenis_tehlili %>%
+  select(payment_method, emeliyyat_payi, gelir_payi) %>%
+  kable(digits = 1)
+
+# Cash payının kateqoriyalar üzrə ən aşağı və ən yüksək səviyyəsi (%)
+kateqoriya_odenis %>%
+  filter(payment_method == "Cash") %>%
+  summarise(
+    en_asagi = min(pay_faizi),
+    en_yuksek = max(pay_faizi)
+  ) %>%
+  kable(digits = 1)
+
+# Technology və Shoes birlikdə gəlir payı (%)
+kateqoriya_tehlili %>%
+  filter(category %in% c("Technology", "Shoes")) %>%
+  summarise(gelir_payi = sum(gelir_payi)) %>%
+  kable(digits = 1)
+```
+
+**Nə gördük:** Cash əməliyyatların **44.7%**-ni və gəlirin 44.8%-ni təşkil edir; ardınca Credit Card (35.1%) və Debit Card (20.2%) gəlir. Cash **8 kateqoriyanın hamısında** birincidir, payı 44.2% (Cosmetics) ilə 45.5% (Books) arasında dəyişir. Ən bahalı kateqoriya olan Technology-də (orta alış 3,157) belə alışların 44.7%-i nağd ödənilir.
+
+**Nə etməli:**
+
+- Ödəniş seçimi kateqoriyadan asılı olmadığı üçün AVM üçün vahid ödəniş strategiyası kifayətdir.
+- Yüksək məbləğli kateqoriyalarda (Technology və Shoes, gəlirin 49.5%-i) bank tərəfdaşları ilə kart və ya taksit kampaniyaları keçirib nağd payını azaltmaq. Bu, kassalarda nağd pulla bağlı risk və xərcləri azaldır, kart vasitəsilə isə müştəri datası (loyallıq proqramı) toplamaq imkanı yaradır.
+
+
+
